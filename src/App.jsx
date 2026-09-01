@@ -1,0 +1,432 @@
+import { useState, useEffect, useRef, useCallback } from 'react';
+import { MapContainer, TileLayer } from 'react-leaflet';
+import { generateIncident } from './data/generateIncident';
+import Section1_IncidentTrigger from './components/Section1_IncidentTrigger';
+import Section2_DataIngestion from './components/Section2_DataIngestion';
+import Section3_SlickAnalysis from './components/Section3_SlickAnalysis';
+import Section4_BackwardReconstruction from './components/Section4_BackwardReconstruction';
+import Section5_ForwardDriftTrace from './components/Section5_ForwardDriftTrace';
+import Section6_VesselIdentification from './components/Section6_VesselIdentification';
+import Section7_EvidenceFusion from './components/Section7_EvidenceFusion';
+
+const STAGE_LABELS = [
+  'Incident Trigger',
+  'Multi-Source Data Ingestion',
+  'Slick Analysis',
+  'Backward Source Reconstruction',
+  'Forward Drift Trace',
+  'Vessel Identification',
+  'Evidence Fusion',
+];
+
+const LOG_PREFIXES = [
+  '[INCIDENT]',
+  '[INGEST]',
+  '[ANALYSIS]',
+  '[RECON]',
+  '[DRIFT]',
+  '[VESSEL]',
+  '[FUSION]',
+];
+
+/* ── Consistent outline icons for data sources ── */
+function IconRadar() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M19.07 4.93A10 10 0 0 0 6.99 3.34" />
+      <path d="M4 6h.01" />
+      <path d="M2.29 9.62A10 10 0 1 0 21.31 8.35" />
+      <path d="M16.24 7.76A6 6 0 1 0 8.23 16.67" />
+      <path d="M12 18h.01" />
+      <circle cx="12" cy="12" r="2" />
+    </svg>
+  );
+}
+
+function IconShip() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M2 21c.6.5 1.2 1 2.5 1 2.5 0 2.5-2 5-2 1.3 0 1.9.5 2.5 1 .6.5 1.2 1 2.5 1 2.5 0 2.5-2 5-2 1.3 0 1.9.5 2.5 1" />
+      <path d="M19.38 20A11.6 11.6 0 0 0 21 14l-9-4-9 4c0 2.9.94 5.34 2.81 7.76" />
+      <path d="M19 13V7a2 2 0 0 0-2-2H7a2 2 0 0 0-2 2v6" />
+      <path d="M12 1v4" />
+    </svg>
+  );
+}
+
+function IconDroplet() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M12 22a7 7 0 0 0 7-7c0-2-1-3.9-3-5.5s-3.5-4-4-6.5c-.5 2.5-2 4.9-4 6.5C6 11.1 5 13 5 15a7 7 0 0 0 7 7z" />
+    </svg>
+  );
+}
+
+function IconWaves() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M2 6c.6.5 1.2 1 2.5 1C7 7 7 5 9.5 5c2.6 0 2.4 2 5 2 2.5 0 2.5-2 5-2 1.3 0 1.9.5 2.5 1" />
+      <path d="M2 12c.6.5 1.2 1 2.5 1 2.5 0 2.5-2 5-2 2.6 0 2.4 2 5 2 2.5 0 2.5-2 5-2 1.3 0 1.9.5 2.5 1" />
+      <path d="M2 18c.6.5 1.2 1 2.5 1 2.5 0 2.5-2 5-2 2.6 0 2.4 2 5 2 2.5 0 2.5-2 5-2 1.3 0 1.9.5 2.5 1" />
+    </svg>
+  );
+}
+
+function IconCloud() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z" />
+    </svg>
+  );
+}
+
+const DATA_SOURCES = [
+  { Icon: IconRadar, name: 'Sentinel-1 SAR', status: 'ready' },
+  { Icon: IconShip, name: 'Historical AIS', status: 'ready' },
+  { Icon: IconWaves, name: 'Ocean / Current', status: 'ready' },
+  { Icon: IconCloud, name: 'Wind Field', status: 'ready' },
+  { Icon: IconDroplet, name: 'Meteorological', status: 'ready' },
+];
+
+function App() {
+  const [incident, setIncident] = useState(null);
+  const [activeStage, setActiveStage] = useState(-1);
+  const [stageStatuses, setStageStatuses] = useState(
+    Array(7).fill('Pending')
+  );
+  const [autoPlay, setAutoPlay] = useState(false);
+  const [speed, setSpeed] = useState(2000);
+  const [log, setLog] = useState([]);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [logoHover, setLogoHover] = useState(false);
+  const logEndRef = useRef(null);
+  const autoPlayRef = useRef(null);
+  const menuRef = useRef(null);
+
+  // Close menu on outside click
+  useEffect(() => {
+    if (!menuOpen) return;
+    function handleClick(e) {
+      if (menuRef.current && !menuRef.current.contains(e.target)) {
+        setMenuOpen(false);
+      }
+    }
+    document.addEventListener('mousedown', handleClick);
+    return () => document.removeEventListener('mousedown', handleClick);
+  }, [menuOpen]);
+
+  const appendLog = useCallback(
+    (stageIdx, message) => {
+      const ts = new Date().toLocaleTimeString('en-US', { hour12: false });
+      setLog((prev) => [
+        ...prev,
+        { ts, prefix: LOG_PREFIXES[stageIdx], message },
+      ]);
+    },
+    []
+  );
+
+  useEffect(() => {
+    logEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [log]);
+
+  const triggerIncident = useCallback(() => {
+    const data = generateIncident();
+    setIncident(data);
+    setActiveStage(-1);
+    setStageStatuses(Array(7).fill('Pending'));
+    setAutoPlay(false);
+    setLog([]);
+    setMenuOpen(false);
+    appendLog(
+      0,
+      `New incident ${data.incidentId} — ${data.satellite} SAR pass over ${data.region} (scene ${data.sceneId}), coordinates ${data.coordinates.lat}°N, ${data.coordinates.lon}°E`
+    );
+  }, [appendLog]);
+
+  const advanceStage = useCallback(() => {
+    setActiveStage((prev) => {
+      const next = prev + 1;
+      if (next >= 7) return prev;
+      return next;
+    });
+  }, []);
+
+  useEffect(() => {
+    if (activeStage < 0 || activeStage >= 7) return;
+
+    setStageStatuses((prev) => {
+      const next = [...prev];
+      next[activeStage] = 'Processing';
+      return next;
+    });
+
+    const timeout = setTimeout(() => {
+      setStageStatuses((prev) => {
+        const next = [...prev];
+        next[activeStage] = 'Complete';
+        return next;
+      });
+      appendLog(activeStage, `${STAGE_LABELS[activeStage]} — processing complete`);
+    }, 800);
+
+    return () => clearTimeout(timeout);
+  }, [activeStage, appendLog]);
+
+  useEffect(() => {
+    if (autoPlay && activeStage < 6) {
+      autoPlayRef.current = setTimeout(() => {
+        setActiveStage((prev) => {
+          if (prev >= 6) {
+            setAutoPlay(false);
+            return prev;
+          }
+          return prev + 1;
+        });
+      }, speed);
+    }
+    return () => clearTimeout(autoPlayRef.current);
+  }, [autoPlay, activeStage, speed]);
+
+  const reset = useCallback(() => {
+    setIncident(null);
+    setActiveStage(-1);
+    setStageStatuses(Array(7).fill('Pending'));
+    setAutoPlay(false);
+    setLog([]);
+  }, []);
+
+  return (
+    <div className="min-h-screen bg-[#F7F8FA]">
+      {/* ── Navbar ── */}
+      <header className="sticky top-0 z-50 border-b border-[#E2E5EA] bg-white/95 backdrop-blur">
+        <div className="flex items-center justify-between px-3 py-3 lg:px-5">
+          {/* Logo */}
+          <div
+            className="relative flex items-center gap-2"
+            onMouseEnter={() => setLogoHover(true)}
+            onMouseLeave={() => setLogoHover(false)}
+          >
+            <div className="flex h-7 w-7 items-center justify-center rounded-md bg-[#ECFDF5] border border-[#D1FAE5]">
+              <span className="text-sm">🛰</span>
+            </div>
+            <h1 className="text-sm font-bold tracking-wider text-[#0EA5B7] mono select-none">
+              SAMUDRA
+            </h1>
+
+            {logoHover && (
+              <div className="absolute top-full left-0 mt-2 w-64 rounded-lg border border-[#E2E5EA] bg-white px-3 py-2 text-[11px] text-[#6B7280] leading-relaxed shadow-sm z-50">
+                Satellite AIS Maritime Unified Detection, Reconstruction &amp; Attribution
+              </div>
+            )}
+          </div>
+
+          {/* Right controls */}
+          <div className="flex items-center gap-2 relative" ref={menuRef}>
+            <div className="relative">
+              <button
+                onClick={() => setMenuOpen((o) => !o)}
+                disabled={!incident}
+                className="flex h-9 w-9 items-center justify-center rounded-lg border border-[#E2E5EA] bg-white text-[#6B7280] hover:bg-gray-50 disabled:opacity-40 transition-colors"
+                title="Mission Control"
+              >
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <line x1="4" y1="21" x2="4" y2="14" />
+                  <line x1="4" y1="10" x2="4" y2="3" />
+                  <line x1="12" y1="21" x2="12" y2="12" />
+                  <line x1="12" y1="8" x2="12" y2="3" />
+                  <line x1="20" y1="21" x2="20" y2="16" />
+                  <line x1="20" y1="12" x2="20" y2="3" />
+                  <line x1="1" y1="14" x2="7" y2="14" />
+                  <line x1="9" y1="8" x2="15" y2="8" />
+                  <line x1="17" y1="16" x2="23" y2="16" />
+                </svg>
+              </button>
+
+              {menuOpen && (
+                <div className="absolute right-0 top-full mt-2 w-60 rounded-xl border border-[#E2E5EA] bg-white p-3 shadow-lg z-50">
+                  <p className="mb-2 text-[10px] font-semibold text-[#9CA3AF] uppercase tracking-wider">Mission Control</p>
+                  <div className="space-y-2">
+                    <button
+                      onClick={() => {
+                        if (autoPlay) {
+                          setAutoPlay(false);
+                        } else {
+                          if (activeStage >= 6) return;
+                          if (activeStage < 0) setActiveStage(0);
+                          else setAutoPlay(true);
+                        }
+                      }}
+                      disabled={!incident || activeStage >= 6}
+                      className="w-full rounded-lg border border-[#E2E5EA] bg-white px-3 py-2 text-left text-xs text-[#374151] hover:bg-gray-50 disabled:opacity-40 transition-colors"
+                    >
+                      {autoPlay ? '⏸ Pause' : '▶ Auto-play'}
+                    </button>
+                    <button
+                      onClick={advanceStage}
+                      disabled={!incident || activeStage >= 6}
+                      className="w-full rounded-lg border border-[#E2E5EA] bg-white px-3 py-2 text-left text-xs text-[#374151] hover:bg-gray-50 disabled:opacity-40 transition-colors"
+                    >
+                      ▶▶ Advance Stage
+                    </button>
+                    <button
+                      onClick={() => { reset(); setMenuOpen(false); }}
+                      className="w-full rounded-lg border border-[#E2E5EA] bg-white px-3 py-2 text-left text-xs text-[#374151] hover:bg-gray-50 transition-colors"
+                    >
+                      ↻ Reset
+                    </button>
+                    <div className="border-t border-[#F3F4F6] pt-2 mt-1">
+                      <div className="flex items-center gap-2 px-1">
+                        <span className="text-[10px] text-[#6B7280]">Speed</span>
+                        <input
+                          type="range"
+                          min={500}
+                          max={5000}
+                          step={250}
+                          value={speed}
+                          onChange={(e) => setSpeed(Number(e.target.value))}
+                          className="flex-1 accent-[#0EA5B7]"
+                        />
+                        <span className="mono text-[10px] text-[#6B7280] w-10 text-right">{speed}ms</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <button
+              onClick={triggerIncident}
+              className="rounded-lg bg-[#0EA5B7] px-4 py-2 text-xs font-semibold text-white hover:bg-[#0e8fa0] transition-colors"
+            >
+              ⚡ Trigger Incident
+            </button>
+          </div>
+        </div>
+      </header>
+
+      <div className="flex flex-col lg:flex-row">
+        {/* Main content */}
+        <main className="flex-1">
+          {!incident ? (
+            /* ── Empty state ── */
+            <div className="relative h-[calc(100vh-52px)] overflow-hidden">
+              {/* Background map — CartoDB Positron, muted */}
+              <div className="absolute inset-0 z-0">
+                <MapContainer
+                  center={[17.5, 68.5]}
+                  zoom={6}
+                  style={{ height: '100%', width: '100%' }}
+                  scrollWheelZoom={false}
+                  zoomControl={false}
+                  dragging={false}
+                  doubleClickZoom={false}
+                  touchZoom={false}
+                  keyboard={false}
+                  attributionControl={false}
+                >
+                  <TileLayer url="https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Base/MapServer/tile/{z}/{y}/{x}" />
+<TileLayer url="https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Reference/MapServer/tile/{z}/{y}/{x}" />
+                </MapContainer>
+                {/* Dimming scrim — matches page bg for calm atmosphere */}
+                <div className="absolute inset-0 bg-[#F7F8FA]/[0.35]" />
+              </div>
+
+              {/* Foreground card — centered with elevation */}
+              <div className="relative z-10 flex h-full items-center justify-center p-6">
+                <div
+                  className="w-full max-w-md rounded-2xl border border-[#E2E5EA] bg-white p-8"
+                  style={{ boxShadow: '0 8px 24px rgba(0,0,0,0.12)' }}
+                >
+                  <div className="mb-4 flex items-center gap-3">
+                    <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-[#ECFDF5] border border-[#D1FAE5]">
+                      <span className="text-xl">🛰</span>
+                    </div>
+                    <div>
+                      <h2 className="text-lg font-bold text-[#1A1D23]">No Active Incident</h2>
+                      <p className="text-xs text-[#6B7280]">Maritime monitoring system idle</p>
+                    </div>
+                  </div>
+
+                  <p className="mb-6 text-sm leading-relaxed text-[#6B7280]">
+                    Click below to generate a synthetic maritime oil-spill scenario and begin the analysis pipeline.
+                  </p>
+
+                  <button
+                    onClick={triggerIncident}
+                    className="mb-6 w-full rounded-lg bg-[#0EA5B7] px-4 py-2.5 text-sm font-semibold text-white hover:bg-[#0e8fa0] transition-colors"
+                  >
+                    ⚡ Trigger Incident
+                  </button>
+
+                  {/* System status */}
+                  <div className="border-t border-[#F3F4F6] pt-4">
+                    <p className="mb-2 text-[10px] font-semibold text-[#9CA3AF] uppercase tracking-wider">System Status</p>
+                    <div className="space-y-2.5">
+                      {DATA_SOURCES.map((src) => (
+                        <div key={src.name} className="flex items-center gap-2.5">
+                          <span className="h-1.5 w-1.5 rounded-full bg-[#059669] shrink-0" />
+                          <span className="text-[#0EA5B7] shrink-0"><src.Icon /></span>
+                          <span className="text-xs font-medium text-[#374151]">{src.name}</span>
+                          <span className="ml-auto text-[10px] font-medium text-[#059669]">ready</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          ) : (
+            <div className="space-y-4 p-4 lg:p-6">
+              <Section1_IncidentTrigger data={incident} status={stageStatuses[0]} />
+              <Section2_DataIngestion data={incident} status={stageStatuses[1]} />
+              <Section3_SlickAnalysis data={incident} status={stageStatuses[2]} />
+              <Section4_BackwardReconstruction data={incident} status={stageStatuses[3]} />
+              <Section5_ForwardDriftTrace data={incident} status={stageStatuses[4]} />
+              <Section6_VesselIdentification data={incident} status={stageStatuses[5]} />
+              <Section7_EvidenceFusion data={incident} status={stageStatuses[6]} />
+            </div>
+          )}
+        </main>
+
+        {/* Investigation Log sidebar */}
+        <aside className={`w-full border-t border-[#E2E5EA] bg-white lg:w-72 lg:border-t-0 lg:border-l xl:w-80 ${!incident ? 'log-panel-empty' : ''}`}>
+          <div className="sticky top-[52px] flex h-[calc(100vh-52px)] flex-col">
+            <div className="border-b border-[#E2E5EA] px-4 py-2.5">
+              <h3 className="text-xs font-semibold text-[#6B7280] uppercase tracking-wider">Investigation Log</h3>
+            </div>
+            <div className="flex-1 overflow-y-auto p-3 space-y-1.5">
+              {log.length === 0 && (
+                <div className="flex flex-col items-center justify-center h-full text-center px-4">
+                  <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="text-[#D1D5DB] mb-2">
+                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z" />
+                    <path d="M14 2v6h6" />
+                    <path d="M16 13H8" />
+                    <path d="M16 17H8" />
+                    <path d="M10 9H8" />
+                  </svg>
+                  <p className="text-xs text-[#9CA3AF] leading-relaxed">
+                    Log entries will appear<br />as stages complete…
+                  </p>
+                </div>
+              )}
+              {log.map((entry, i) => (
+                <div key={i} className="text-[11px] leading-relaxed">
+                  <span className="mono text-[#9CA3AF]">{entry.ts}</span>{' '}
+                  <span className="mono font-semibold text-[#0EA5B7]">{entry.prefix}</span>{' '}
+                  <span className="text-[#374151]">{entry.message}</span>
+                </div>
+              ))}
+              <div ref={logEndRef} />
+            </div>
+            <div className="border-t border-[#E2E5EA] px-4 py-2">
+              <span className="mono text-[10px] text-[#9CA3AF]">{log.length} entries</span>
+            </div>
+          </div>
+        </aside>
+      </div>
+    </div>
+  );
+}
+
+export default App;

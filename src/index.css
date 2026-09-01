@@ -1,0 +1,79 @@
+@import "tailwindcss";
+
+@layer base {
+  :root {
+    --cyan: #0EA5B7;
+    --cyan-dim: #0e7490;
+    --amber: #d97706;
+    --red: #dc2626;
+    --teal: #0d9488;
+    --page-bg: #F7F8FA;
+    --card-bg: #FFFFFF;
+    --card-border: #E2E5EA;
+    --text-primary: #1A1D23;
+    --text-secondary: #6B7280;
+    --text-dim: #9CA3AF;
+    --panel-bg: #FFFFFF;
+    --panel-border: #E2E5EA;
+  }
+}
+
+@layer base {
+  * {
+    box-sizing: border-box;
+  }
+
+  body {
+    margin: 0;
+    padding: 0;
+    background: var(--page-bg);
+    color: var(--text-primary);
+    font-family: 'Inter', system-ui, -apple-system, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  #root {
+    min-height: 100vh;
+  }
+
+  /* Monospace for data/coordinates */
+  .mono {
+    font-family: 'JetBrains Mono', 'Fira Code', ui-monospace, Consolas, monospace;
+  }
+
+  /* Leaflet overrides for light theme */
+  .leaflet-container {
+    background: #e5e7eb !important;
+    border-radius: 8px;
+  }
+  .leaflet-control-zoom a {
+    background: #ffffff !important;
+    color: #1A1D23 !important;
+    border-color: #E2E5EA !important;
+  }
+  .leaflet-popup-content-wrapper {
+    background: #ffffff !important;
+    color: #1A1D23 !important;
+    border: 1px solid #E2E5EA;
+  }
+  .leaflet-popup-tip {
+    background: #ffffff !important;
+  }
+}
+
+/* Empty state map — non-interactive */
+.empty-map .leaflet-container {
+  pointer-events: none !important;
+  cursor: default !important;
+}
+.empty-map .leaflet-control-zoom,
+.empty-map .leaflet-control-attribution {
+  display: none !important;
+}
+
+/* Sidebar seam shadow during empty state */
+@media (min-width: 1024px) {
+  .log-panel-empty {
+    box-shadow: -4px 0 12px -2px rgba(0, 0, 0, 0.06);
+  }
+}
