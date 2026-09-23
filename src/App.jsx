@@ -361,7 +361,8 @@ function App() {
                   keyboard={false}
                   attributionControl={false}
                 >
-                  <TileLayer url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png" />
+                  <TileLayer url="https://server.arcgisonline.com/ArcGIS/rest/services/Ocean/World_Ocean_Base/MapServer/tile/{z}/{y}/{x}" />
+                  <TileLayer url="https://server.arcgisonline.com/ArcGIS/rest/services/Ocean/World_Ocean_Reference/MapServer/tile/{z}/{y}/{x}" />
                 </MapContainer>
                 {/* Dimming scrim — matches page bg for calm atmosphere */}
                 <div className="absolute inset-0 bg-[#F7F8FA]/[0.35]" />
