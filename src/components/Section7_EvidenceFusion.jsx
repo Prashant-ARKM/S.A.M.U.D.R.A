@@ -1,31 +1,59 @@
-import { BarChart, Bar, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer, CartesianGrid } from 'recharts';
+import {
+  RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, Radar,
+  ResponsiveContainer, Tooltip, Legend,
+} from 'recharts';
 import SectionCard from './SectionCard';
 
 const COLORS = {
   spatial: '#0EA5B7',
   temporal: '#7c3aed',
+  heading: '#16A34A',
   behavioural: '#D97706',
-  sarMatch: '#16A34A',
 };
+const RADAR_COLORS = ['#0EA5B7', '#7c3aed', '#D97706'];
+const DIMENSIONS = ['Spatial', 'Temporal', 'Heading', 'Behavioural'];
 
-function ScoreBar({ label, value, color }) {
+function shortName(name) {
+  return name.split(' ').slice(-1)[0];
+}
+
+// Circular progress ring — the dashboard-style stand-in for the old flat
+// bar, used both for each candidate's overall score and for the four
+// evidence sub-scores.
+function ScoreRing({ value, size = 56, stroke = 6, color, label }) {
+  const radius = (size - stroke) / 2;
+  const circumference = 2 * Math.PI * radius;
+  const offset = circumference * (1 - Math.max(0, Math.min(1, value)));
   return (
-    <div className="flex items-center gap-2">
-      <span className="w-24 text-xs text-[#6B7280]">{label}</span>
-      <div className="h-2 flex-1 rounded-full bg-[#F3F4F6]">
-        <div
-          className="h-full rounded-full transition-all duration-500"
-          style={{ width: `${value * 100}%`, backgroundColor: color }}
-        />
+    <div className="flex flex-col items-center gap-1">
+      <div className="relative" style={{ width: size, height: size }}>
+        <svg width={size} height={size} style={{ transform: 'rotate(-90deg)' }}>
+          <circle cx={size / 2} cy={size / 2} r={radius} fill="none" stroke="#F3F4F6" strokeWidth={stroke} />
+          <circle
+            cx={size / 2}
+            cy={size / 2}
+            r={radius}
+            fill="none"
+            stroke={color}
+            strokeWidth={stroke}
+            strokeDasharray={circumference}
+            strokeDashoffset={offset}
+            strokeLinecap="round"
+            style={{ transition: 'stroke-dashoffset 0.7s ease' }}
+          />
+        </svg>
+        <div className="absolute inset-0 flex items-center justify-center">
+          <span className="mono font-semibold" style={{ color, fontSize: size * 0.26 }}>
+            {Math.round(value * 100)}
+          </span>
+        </div>
       </div>
-      <span className="mono w-12 text-right text-xs text-[#374151]">
-        {value.toFixed(2)}
-      </span>
+      {label && <span className="text-center text-[10px] leading-tight text-[#6B7280]">{label}</span>}
     </div>
   );
 }
 
-const CustomTooltip = ({ active, payload, label }) => {
+const CustomRadarTooltip = ({ active, payload, label }) => {
   if (!active || !payload) return null;
   return (
     <div className="rounded-lg border border-[#E2E5EA] bg-white p-2 text-xs shadow-lg">
@@ -39,59 +67,112 @@ const CustomTooltip = ({ active, payload, label }) => {
   );
 };
 
+const CF_STYLE = {
+  consistent: { icon: '✓', className: 'bg-green-50 text-green-700 border-green-200' },
+  partial: { icon: '~', className: 'bg-amber-50 text-amber-700 border-amber-200' },
+  inconsistent: { icon: '✗', className: 'bg-red-50 text-red-700 border-red-200' },
+};
+
+function CounterfactualChip({ cf }) {
+  if (!cf) return null;
+  const style = CF_STYLE[cf.verdict] || CF_STYLE.inconsistent;
+  const title = cf.note
+    ? cf.note
+    : `Hypothetical release forward-drifted ${cf.elapsedHours}h landed ${cf.distanceFromObservedKm}km from the observed slick (${cf.overlapScore}% overlap).`;
+  return (
+    <span title={title} className={`mono inline-flex items-center gap-1 rounded border px-1.5 py-0.5 text-[10px] ${style.className}`}>
+      🔄 {style.icon} {cf.overlapScore}%
+    </span>
+  );
+}
+
+// Small icon row for the behavioural red flags — same data Section 6's
+// timeline bar uses, just condensed to glanceable icons here.
+function FlagIcons({ v }) {
+  const flags = [];
+  if (v.aisGapHours > 0) flags.push({ icon: '📡', title: `AIS Gap: ${v.aisGapHours}h dark` });
+  if (v.speedAnomaly) flags.push({ icon: '⚡', title: `Speed dropped ${v.speedAnomalyFromKnots}kn → ${v.speedAnomalyToKnots}kn` });
+  if (v.loiterHours > 0) flags.push({ icon: '⚓', title: `Loitered ${v.loiterHours}h near origin` });
+  if (!flags.length) return <span className="text-[10px] text-[#9CA3AF]">No red flags</span>;
+  return (
+    <div className="flex items-center gap-1">
+      {flags.map((f, i) => (
+        <span key={i} title={f.title} className="cursor-help text-sm leading-none">{f.icon}</span>
+      ))}
+    </div>
+  );
+}
+
 export default function Section7_EvidenceFusion({ data, status }) {
   if (!data) return <SectionCard number={7} title="Evidence Fusion & Hypothesis" status="Pending"><div className="h-20" /></SectionCard>;
 
-  const { rankedCandidates, mostProbableCandidate, fusionUncertainty } = data;
+  const { rankedCandidates, mostProbableCandidate, sourceStatus, closestLead, fusionUncertainty, counterfactuals } = data;
+  const counterfactualByImo = Object.fromEntries((counterfactuals || []).map((cf) => [cf.imo, cf]));
 
-  const chartData = rankedCandidates.map((v) => ({
-    name: v.name.split(' ').slice(-1)[0], // short name
-    fullName: v.name,
-    spatial: v.spatialScore,
-    temporal: v.temporalScore,
-    behavioural: v.behaviouralScore,
-    sarMatch: v.sarMatchScore,
-  }));
+  const radarData = DIMENSIONS.map((dim, i) => {
+    const row = { dimension: dim };
+    rankedCandidates.slice(0, 3).forEach((v) => {
+      row[shortName(v.name)] = [v.spatialScore, v.temporalScore, v.headingScore, v.behaviouralScore][i];
+    });
+    return row;
+  });
 
   return (
     <SectionCard number={7} title="Evidence Fusion & Hypothesis" status={status}>
       <div className="grid gap-4 lg:grid-cols-3">
-        {/* Chart + ranked list */}
-        <div className="lg:col-span-2 space-y-4">
+        {/* Radar comparison + ranked cards */}
+        <div className="space-y-4 lg:col-span-2">
           <div className="rounded-lg border border-[#E2E5EA] bg-[#F9FAFB] p-3">
             <span className="text-xs font-semibold text-[#6B7280] uppercase tracking-wider">
-              Relative Evidence Scores per Candidate — Weighted: 0.40·Spatial + 0.25·Temporal + 0.20·SAR/Trajectory + 0.15·Behavioural
+              Evidence Profile — Top {Math.min(3, rankedCandidates.length)} Candidates · Weighted 0.40·Spatial + 0.25·Temporal + 0.20·Heading + 0.15·Behavioural
             </span>
-            <div className="mt-2 h-[220px]">
+            <div className="mt-2 h-[240px]">
               <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={chartData} barGap={2} barCategoryGap="20%">
-                  <CartesianGrid strokeDasharray="3 3" stroke="#E2E5EA" />
-                  <XAxis dataKey="name" tick={{ fill: '#6B7280', fontSize: 11 }} />
-                  <YAxis tick={{ fill: '#6B7280', fontSize: 11 }} domain={[0, 1]} tickFormatter={(v) => v.toFixed(1)} />
-                  <Tooltip content={<CustomTooltip />} />
+                <RadarChart data={radarData} outerRadius="72%">
+                  <PolarGrid stroke="#E2E5EA" />
+                  <PolarAngleAxis dataKey="dimension" tick={{ fill: '#6B7280', fontSize: 11 }} />
+                  <PolarRadiusAxis domain={[0, 1]} tickCount={3} tick={{ fill: '#9CA3AF', fontSize: 9 }} axisLine={false} />
+                  {rankedCandidates.slice(0, 3).map((v, i) => (
+                    <Radar
+                      key={v.imo}
+                      name={v.name}
+                      dataKey={shortName(v.name)}
+                      stroke={RADAR_COLORS[i]}
+                      fill={RADAR_COLORS[i]}
+                      fillOpacity={0.15}
+                      strokeWidth={2}
+                    />
+                  ))}
                   <Legend wrapperStyle={{ fontSize: 11 }} />
-                  <Bar dataKey="spatial" name="Spatial" fill={COLORS.spatial} radius={[2, 2, 0, 0]} />
-                  <Bar dataKey="temporal" name="Temporal" fill={COLORS.temporal} radius={[2, 2, 0, 0]} />
-                  <Bar dataKey="behavioural" name="Behavioural" fill={COLORS.behavioural} radius={[2, 2, 0, 0]} />
-                  <Bar dataKey="sarMatch" name="Trajectory / SAR" fill={COLORS.sarMatch} radius={[2, 2, 0, 0]} />
-                </BarChart>
+                  <Tooltip content={<CustomRadarTooltip />} />
+                </RadarChart>
               </ResponsiveContainer>
             </div>
           </div>
 
-          {/* Ranked suspects — every surviving candidate, not just the top one */}
+          {/* Ranked suspects — card grid, every surviving candidate */}
           <div className="rounded-lg border border-[#E2E5EA] bg-[#F9FAFB] p-3">
-            <span className="text-xs font-semibold text-[#6B7280] uppercase tracking-wider">Ranked Suspects</span>
-            <div className="mt-2 space-y-2">
+            <div className="flex flex-wrap items-baseline justify-between gap-1">
+              <span className="text-xs font-semibold text-[#6B7280] uppercase tracking-wider">Ranked Suspects</span>
+              <span className="text-[10px] text-[#9CA3AF]">🔄 = counterfactual drift check</span>
+            </div>
+            <div className="mt-2 grid gap-2 sm:grid-cols-2">
               {rankedCandidates.map((v, i) => (
-                <div key={v.imo} className="rounded-lg border border-[#E2E5EA] bg-white p-2.5">
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs font-semibold text-[#374151]">
-                      #{i + 1} {v.name} <span className="mono font-normal text-[#9CA3AF]">{v.imo}</span>
+                <div key={v.imo} className="flex items-start gap-3 rounded-lg border border-[#E2E5EA] bg-white p-3">
+                  <div className="relative shrink-0">
+                    <ScoreRing value={v.finalScore} size={52} stroke={5} color={i === 0 ? '#0EA5B7' : '#9CA3AF'} />
+                    <span className="absolute -left-1.5 -top-1.5 flex h-5 w-5 items-center justify-center rounded-full bg-[#1A1D23] text-[10px] font-bold text-white">
+                      {i + 1}
                     </span>
-                    <span className="mono text-xs font-semibold text-[#0EA5B7]">{(v.finalScore * 100).toFixed(1)}%</span>
                   </div>
-                  <p className="mt-1 text-xs leading-relaxed text-[#6B7280]">{v.reason}</p>
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-xs font-semibold text-[#374151]">{v.name}</p>
+                    <p className="mono text-[10px] text-[#9CA3AF]">{v.imo}</p>
+                    <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+                      <FlagIcons v={v} />
+                      <CounterfactualChip cf={counterfactualByImo[v.imo]} />
+                    </div>
+                  </div>
                 </div>
               ))}
             </div>
@@ -100,55 +181,110 @@ export default function Section7_EvidenceFusion({ data, status }) {
 
         {/* Most Probable Candidate + uncertainty */}
         <div className="space-y-3">
-          <div className="rounded-lg border border-[#A5F3FC] bg-[#ECFEFF] p-4">
-            <div className="mb-2 flex items-center gap-2">
-              <span className="text-[#0EA5B7]">🎯</span>
-              <span className="text-xs font-semibold text-[#0E7490] uppercase tracking-wider">Most Probable Candidate</span>
-            </div>
-            <p className="text-sm font-semibold text-[#1A1D23]">{mostProbableCandidate.name}</p>
-            <p className="mono text-xs text-[#6B7280]">{mostProbableCandidate.imo}</p>
+          {sourceStatus === 'attributed' ? (
+            <div className="rounded-lg border border-[#A5F3FC] bg-[#ECFEFF] p-4">
+              <div className="mb-3 flex items-center gap-2">
+                <span className="text-[#0EA5B7]">🎯</span>
+                <span className="text-xs font-semibold text-[#0E7490] uppercase tracking-wider">Most Probable Candidate</span>
+              </div>
 
-            <div className="mt-3 space-y-2">
-              <ScoreBar label="Spatial" value={mostProbableCandidate.spatialScore} color={COLORS.spatial} />
-              <ScoreBar label="Temporal" value={mostProbableCandidate.temporalScore} color={COLORS.temporal} />
-              <ScoreBar label="Behavioural" value={mostProbableCandidate.behaviouralScore} color={COLORS.behavioural} />
-              <ScoreBar label="Trajectory / SAR" value={mostProbableCandidate.sarMatchScore} color={COLORS.sarMatch} />
-            </div>
+              <div className="flex items-center gap-3">
+                <ScoreRing value={mostProbableCandidate.finalScore} size={72} stroke={7} color="#0EA5B7" />
+                <div className="min-w-0">
+                  <p className="text-sm font-semibold text-[#1A1D23]">{mostProbableCandidate.name}</p>
+                  <p className="mono text-xs text-[#6B7280]">{mostProbableCandidate.imo}</p>
+                  <div className="mt-1"><CounterfactualChip cf={counterfactualByImo[mostProbableCandidate.imo]} /></div>
+                </div>
+              </div>
 
-            <div className="mt-3 rounded-lg border border-[#E2E5EA] bg-white p-2.5">
-              <p className="text-xs text-[#6B7280]">
-                Association score: <span className="mono font-semibold text-[#0EA5B7]">{(mostProbableCandidate.finalScore * 100).toFixed(1)}%</span>
+              {counterfactualByImo[mostProbableCandidate.imo]?.verdict === 'inconsistent' && (
+                <div className="mt-3 rounded-lg border border-red-200 bg-red-50 p-2">
+                  <p className="text-xs font-semibold text-red-700">⚠ Contradicting evidence</p>
+                  <p className="mt-0.5 text-[11px] leading-relaxed text-red-700">
+                    This vessel ranks highest on AIS/spatial/temporal evidence, but the counterfactual drift check does NOT
+                    reach the observed slick from its own reported position — the two methods disagree. Treat this ranking
+                    with extra caution pending investigator review.
+                  </p>
+                </div>
+              )}
+
+              <div className="mt-4 grid grid-cols-4 gap-1">
+                <ScoreRing value={mostProbableCandidate.spatialScore} size={48} stroke={4} color={COLORS.spatial} label="Spatial" />
+                <ScoreRing value={mostProbableCandidate.temporalScore} size={48} stroke={4} color={COLORS.temporal} label="Temporal" />
+                <ScoreRing value={mostProbableCandidate.headingScore} size={48} stroke={4} color={COLORS.heading} label="Heading" />
+                <ScoreRing value={mostProbableCandidate.behaviouralScore} size={48} stroke={4} color={COLORS.behavioural} label="Behaviour" />
+              </div>
+
+              <div className="mt-3 rounded-lg border border-[#E2E5EA] bg-white p-2.5">
+                <p className="text-xs text-[#6B7280]">
+                  Composite evidence: <span className="mono">{(mostProbableCandidate.composite * 100).toFixed(1)}%</span> × reconstruction-confidence adjustment
+                </p>
+                <p className="mt-0.5 text-xs text-[#6B7280]">
+                  Association score: <span className="mono font-semibold text-[#0EA5B7]">{(mostProbableCandidate.finalScore * 100).toFixed(1)}%</span>
+                </p>
+              </div>
+
+              <p className="mt-3 text-xs leading-relaxed text-[#6B7280]">
+                <span className="font-semibold text-[#374151]">{mostProbableCandidate.name}</span> ranks highest because it is{' '}
+                {mostProbableCandidate.reason} This is a statistically probable association, not a definitive attribution — the ranking
+                reflects available evidence, not a finding of fault.
               </p>
             </div>
-
-            <p className="mt-3 text-xs leading-relaxed text-[#6B7280]">
-              <span className="font-semibold text-[#374151]">{mostProbableCandidate.name}</span> ranks highest because it is{' '}
-              {mostProbableCandidate.reason} This is a statistically probable association, not a definitive attribution — the ranking
-              reflects available evidence, not a finding of fault.
-            </p>
-          </div>
+          ) : (
+            <div className="rounded-lg border border-[#E2E5EA] bg-[#F9FAFB] p-4">
+              <div className="mb-2 flex items-center gap-2">
+                <span className="text-[#6B7280]">❓</span>
+                <span className="text-xs font-semibold text-[#374151] uppercase tracking-wider">Source Unknown</span>
+              </div>
+              <p className="text-xs leading-relaxed text-[#6B7280]">
+                No candidate vessel meets the confidence threshold for attribution. This may mean the discharging vessel was not
+                transmitting usable AIS at the time, or that this was not a vessel-sourced spill at all.
+              </p>
+              {closestLead && (
+                <div className="mt-3 flex items-center gap-3 rounded-lg border border-[#E2E5EA] bg-white p-2.5">
+                  <ScoreRing value={closestLead.finalScore} size={48} stroke={5} color="#9CA3AF" />
+                  <div className="min-w-0">
+                    <p className="text-[10px] text-[#9CA3AF]">Closest partial match — not attributed</p>
+                    <p className="truncate text-sm font-semibold text-[#374151]">{closestLead.name}</p>
+                    <p className="mono text-xs text-[#9CA3AF]">{closestLead.imo}</p>
+                    <div className="mt-1"><CounterfactualChip cf={counterfactualByImo[closestLead.imo]} /></div>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
 
           <div className="rounded-lg border border-[#FDE68A] bg-[#FFFBEB] p-3 space-y-2">
             <p className="text-xs font-semibold text-[#B45309]">⚠ Uncertainty &amp; Limitations</p>
-            <p className="text-xs text-[#92400E]">
-              Backward reconstruction confidence: <span className="mono">{(fusionUncertainty.reconstructionConfidence * 100).toFixed(0)}%</span>{' '}
-              (±{(fusionUncertainty.uncertaintyRadiusM / 1000).toFixed(1)} km origin uncertainty). Forward forecast confidence:{' '}
-              <span className="mono">{(fusionUncertainty.forecastConfidence * 100).toFixed(0)}%</span>.
+            <p className="flex items-start gap-1.5 text-xs text-[#92400E]">
+              <span>📉</span>
+              <span>
+                Backward reconstruction confidence: <span className="mono">{(fusionUncertainty.reconstructionConfidence * 100).toFixed(0)}%</span>{' '}
+                (±{(fusionUncertainty.uncertaintyRadiusM / 1000).toFixed(1)} km origin uncertainty). Forward forecast confidence:{' '}
+                <span className="mono">{(fusionUncertainty.forecastConfidence * 100).toFixed(0)}%</span>.
+              </span>
             </p>
-            <p className="text-xs text-[#92400E]">
-              AIS dataset coverage: <span className="mono">{fusionUncertainty.aisCoverage}%</span> ({fusionUncertainty.aisStatus}). Dark
-              periods and coverage gaps mean some vessels may be under- or over-scored.
+            <p className="flex items-start gap-1.5 text-xs text-[#92400E]">
+              <span>📶</span>
+              <span>
+                AIS dataset coverage: <span className="mono">{fusionUncertainty.aisCoverage}%</span> ({fusionUncertainty.aisStatus}). Dark
+                periods and coverage gaps mean some vessels may be under- or over-scored.
+              </span>
             </p>
-            <p className="text-xs text-[#B45309]">
-              Vessels without functioning or transmitting AIS are not captured by this analysis at all and cannot be ruled in or out.
+            <p className="flex items-start gap-1.5 text-xs text-[#B45309]">
+              <span>🚫</span>
+              <span>Vessels without functioning or transmitting AIS are not captured by this analysis at all and cannot be ruled in or out.</span>
             </p>
           </div>
 
           <div className="rounded-lg border border-[#FDE68A] bg-[#FFFBEB] p-3">
-            <p className="text-xs text-[#B45309]">
-              <span className="font-semibold">⚠ Disclaimer:</span> This is an AI-generated decision-support hypothesis.
-              It does not constitute legal evidence, regulatory compliance, or a determination of liability.
-              All findings require independent verification by qualified investigators.
+            <p className="flex items-start gap-1.5 text-xs text-[#B45309]">
+              <span>⚖️</span>
+              <span>
+                <span className="font-semibold">Disclaimer:</span> This is an AI-generated decision-support hypothesis.
+                It does not constitute legal evidence, regulatory compliance, or a determination of liability.
+                All findings require independent verification by qualified investigators.
+              </span>
             </p>
           </div>
         </div>

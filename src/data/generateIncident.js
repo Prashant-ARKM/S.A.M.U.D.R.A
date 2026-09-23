@@ -4,9 +4,12 @@
 import { ingestDataSources } from './generateIngestion';
 import { analyzeSarScene } from './generateSarScene';
 import { reconstructOrigin } from './generateHindcast';
+import { estimateSpillAge } from './generateSpillAge';
 import { forecastForward } from './generateForecast';
 import { identifyVessels } from './generateVesselAttribution';
 import { fuseEvidence } from './generateEvidenceFusion';
+import { generateEoValidation } from './generateEoValidation';
+import { simulateCounterfactuals } from './generateCounterfactual';
 import { deriveSeed } from './rng';
 
 function mulberry32(a) {
@@ -36,8 +39,8 @@ const MARITIME_REGIONS = [
   'North Arabian Sea — Indian EEZ Sector 4',
 ];
 
-export function generateIncident() {
-  const seed = Math.floor(Math.random() * 2147483647);
+export function generateIncident(options = {}) {
+  const seed = options.seed ?? Math.floor(Math.random() * 2147483647);
   const rng = mulberry32(seed);
 
   const rand = () => rng();
@@ -45,9 +48,13 @@ export function generateIncident() {
   const randFloat = (min, max, dec = 3) => parseFloat((rand() * (max - min) + min).toFixed(dec));
   const pick = (arr) => arr[Math.floor(rand() * arr.length)];
 
-  // Base coordinates — Arabian Sea, off Mumbai High / west coast shipping lanes
-  const baseLat = randFloat(18.5, 19.8);
-  const baseLon = randFloat(69.5, 71.5);
+  // Base coordinates — Arabian Sea, off Mumbai High / west coast shipping
+  // lanes by default. A "Report a Spill" tip-off instead anchors here: a
+  // small offset is still applied, because a human-reported position is
+  // rarely pixel-exact against what the satellite actually resolves.
+  const reported = options.anchorLat != null && options.anchorLon != null;
+  const baseLat = reported ? options.anchorLat + randFloat(-0.03, 0.03) : randFloat(18.5, 19.8);
+  const baseLon = reported ? options.anchorLon + randFloat(-0.03, 0.03) : randFloat(69.5, 71.5);
 
   const incidentId = `INC-${new Date().getFullYear()}-${String(randInt(1000, 9999))}`;
   const timestamp = new Date().toISOString();
@@ -66,7 +73,7 @@ export function generateIncident() {
     .replace(/[-:]/g, '')
     .slice(0, 15)}`;
 
-  const region = pick(MARITIME_REGIONS);
+  const region = reported ? 'Reported Zone — User-Flagged Coordinates' : pick(MARITIME_REGIONS);
   const anomalyDetected = true;
 
   // Slick shape + classification — derived from a synthetic SAR scene
@@ -84,7 +91,9 @@ export function generateIncident() {
   // the same detection.
   const anomalyConfidence = detectedClassification.confidence;
   const detectionStatus =
-    anomalyConfidence >= 0.75 ? 'Confirmed by Automated Detection' : 'Flagged — Pending Analyst Review';
+    anomalyConfidence >= 0.75
+      ? (reported ? 'Confirmed — Reported Zone Investigation' : 'Confirmed by Automated Detection')
+      : 'Flagged — Pending Analyst Review';
   const anomalyStatus =
     anomalyConfidence >= 0.8 ? 'Probable Oil Slick — High Confidence' : 'Probable Oil Slick — Awaiting Confirmation';
 
@@ -124,6 +133,17 @@ export function generateIncident() {
     seed,
   });
 
+  // Step 3c — Slick Age Estimation (its own module: ./generateSpillAge.js).
+  // Independent of Step 4 by design — a thinning/appearance-based method,
+  // cross-checked against (not derived from) the drift-based release
+  // window above.
+  const spillAge = estimateSpillAge({
+    seed,
+    slick: detectedSlick,
+    releaseTimeWindow,
+    acquisitionTime,
+  });
+
   // Step 5 — Forward Spill Prediction (its own module: ./generateForecast.js).
   // Seeded at the Step 4 reconstructed origin using the same Step 2
   // ocean/wind sources — not an independent direction/spread.
@@ -154,11 +174,24 @@ export function generateIncident() {
 });
 
 
+  // Step 3b — Electro-Optical Validation (its own module:
+  // ./generateEoValidation.js). Optional clear-sky cross-check on the same
+  // Step 3 slick — only "available" when simulated daylight/cloud
+  // conditions would realistically allow it.
+  const eoValidation = generateEoValidation({
+    seed,
+    slick: detectedSlick,
+    lookalike: sarGroundTruth.lookalike,
+    candidates,
+    classification: detectedClassification,
+    sarAcquisitionTime: acquisitionTime,
+  });
+
   // Step 7 — Evidence Fusion & Hypothesis (its own module:
   // ./generateEvidenceFusion.js). Combines the Step 6 candidate scores with
   // the Step 4 reconstruction confidence and Step 5 forecast confidence —
   // not independently generated.
-  const { ranked: rankedCandidates, mostProbable: mostProbableCandidate, uncertainty: fusionUncertainty } = fuseEvidence({
+  const { ranked: rankedCandidates, mostProbable: mostProbableCandidate, sourceStatus, closestLead, uncertainty: fusionUncertainty } = fuseEvidence({
     candidates,
     reconstructionConfidence,
     forecastConfidence,
@@ -166,11 +199,29 @@ export function generateIncident() {
     aisSource,
   });
 
+  // Step 7b — Counterfactual Spill Simulation (its own module:
+  // ./generateCounterfactual.js). Independent corroboration check on the
+  // Step 7 ranking, not a re-scoring — forward-drifts each ranked
+  // candidate's own AIS position and checks whether it would actually
+  // reach the observed Step 3 slick.
+  const counterfactuals = simulateCounterfactuals({
+    rankedCandidates,
+    observedSlick: detectedSlick.location,
+    acquisitionTime,
+    oceanSource,
+    windSource,
+    uncertaintyRadiusM,
+    seed,
+  });
+
   return {
     seed,
     incidentId,
     timestamp,
     coordinates: { lat: baseLat, lon: baseLon },
+    source: reported ? 'reported' : 'auto',
+    reportedLocation: reported ? { lat: options.anchorLat, lon: options.anchorLon } : null,
+    reportNotes: options.reportNotes || null,
 
     // Step 1 — Incident Detection (also exposed flat below for easy
     // consumption by later stages: id, satellite, sceneId, latitude,
@@ -190,10 +241,12 @@ export function generateIncident() {
 
     slick: detectedSlick,
     classification: detectedClassification,
+    spillAge,
     // Hidden ground truth — not read by any component, kept only so a
     // later validation/scoring pass can compare the detector's estimate
     // above against what was actually planted in the synthetic scene.
     _sarGroundTruth: sarGroundTruth,
+    eoValidation,
     sources,
     origin: { lat: originLat, lon: originLon },
     releaseTimeWindow,
@@ -209,7 +262,10 @@ export function generateIncident() {
     candidates,
     rankedCandidates,
     mostProbableCandidate,
+    sourceStatus,
+    closestLead,
     fusionUncertainty,
+    counterfactuals,
     filteredOutCount,
     tracksConsidered,
   };

@@ -11,7 +11,14 @@
 //
 // Interface: fuseEvidence({ candidates, reconstructionConfidence,
 // forecastConfidence, uncertaintyRadiusM, aisSource }) -> { ranked,
-// mostProbable, uncertainty }
+// mostProbable, sourceStatus, closestLead, uncertainty }
+
+// Below this final-score threshold, the evidence is too weak to call it an
+// attribution — the highest-ranked candidate is still surfaced (as
+// `closestLead`), but explicitly NOT as `mostProbable`. This is what makes
+// an honest "source unknown" outcome possible instead of always forcing a
+// pick.
+const ATTRIBUTION_CONFIDENCE_THRESHOLD = 0.42;
 
 function describeLevel(value, labels) {
   if (value >= 0.7) return labels[0];
@@ -22,7 +29,7 @@ function describeLevel(value, labels) {
 function buildReason(c) {
   const proximity = describeLevel(c.spatialScore, ['close to', 'moderately near', 'far from']);
   const timing = describeLevel(c.temporalScore, ['tightly aligned with', 'roughly aligned with', 'loosely aligned with']);
-  const heading = describeLevel(c.sarMatchScore, ['heading consistent with', 'heading partly consistent with', 'heading inconsistent with']);
+  const heading = describeLevel(c.headingScore, ['heading consistent with', 'heading partly consistent with', 'heading inconsistent with']);
   return `${proximity} the reconstructed origin (${c.distFromOrigin}km), ${timing} the release window, with a ${c.aisGapHours}h AIS gap and ${heading} the spill bearing.`;
 }
 
@@ -41,7 +48,9 @@ export function fuseEvidence({ candidates, reconstructionConfidence, forecastCon
     }))
     .sort((a, b) => b.finalScore - a.finalScore);
 
-  const mostProbable = ranked[0];
+  const closestLead = ranked[0] || null;
+  const sourceStatus = closestLead && closestLead.finalScore >= ATTRIBUTION_CONFIDENCE_THRESHOLD ? 'attributed' : 'unknown';
+  const mostProbable = sourceStatus === 'attributed' ? closestLead : null;
 
   const uncertainty = {
     reconstructionConfidence,
@@ -51,5 +60,5 @@ export function fuseEvidence({ candidates, reconstructionConfidence, forecastCon
     aisStatus: aisSource?.status,
   };
 
-  return { ranked, mostProbable, uncertainty };
+  return { ranked, mostProbable, sourceStatus, closestLead, uncertainty };
 }

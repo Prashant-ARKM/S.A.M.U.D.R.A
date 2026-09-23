@@ -149,6 +149,8 @@ function buildTrack({
   speedKnots,
   darkStartHours,
   darkDurationHours,
+  speedAnomaly,
+  loiterHours,
   rng,
 }) {
   const stepHours = POINT_INTERVAL_HOURS;
@@ -166,6 +168,7 @@ function buildTrack({
   );
 
   const track = [];
+  const slowSpeedKnots = toFixedNumber(speedKnots * 0.22, 1);
 
   for (let i = 0; i < TRACK_POINTS; i += 1) {
     const timeMs = startMs + i * stepMs;
@@ -173,11 +176,19 @@ function buildTrack({
     const hoursFromClosest =
       (timeMs - closestTimeMs) / 3600000;
 
-    const travelKmPerHour =
-      speedKnots * 1.852;
+    // Position always follows the nominal cruise speed, so the track path
+    // itself stays continuous — behavioural anomalies below only affect
+    // the *reported speed value* and, for loitering, a local cluster, not
+    // a physically re-integrated slower trajectory (this is a display
+    // mock, not a kinematics simulator).
+    const travelKmPerHour = speedKnots * 1.852;
 
-    const alongTrackKm =
-      hoursFromClosest * travelKmPerHour;
+    const inLoiterWindow =
+      loiterHours > 0 &&
+      Math.abs(hoursFromClosest) <= loiterHours / 2;
+
+    let alongTrackKm = hoursFromClosest * travelKmPerHour;
+    if (inLoiterWindow) alongTrackKm = 0; // pinned near the closest-approach point while loitering
 
     const point = destination(
       closestPoint.lat,
@@ -188,8 +199,9 @@ function buildTrack({
 
     const jitterBearing = bearing + 90;
 
-    const jitterKm =
-      Math.sin(i * 0.73 + rng.rand() * 0.2) * 0.35;
+    const jitterKm = inLoiterWindow
+      ? Math.sin(i * 1.6 + rng.rand() * 0.3) * 1.1 // wider circling jitter while loitering
+      : Math.sin(i * 0.73 + rng.rand() * 0.2) * 0.35;
 
     const jittered = destination(
       point.lat,
@@ -209,6 +221,10 @@ function buildTrack({
       hoursFromStart <
         darkStartHours + darkDurationHours;
 
+    let pointSpeed = speedKnots;
+    if (inLoiterWindow) pointSpeed = rng.randFloat(0.8, 2.2, 1);
+    else if (speedAnomaly && Math.abs(hoursFromClosest) <= stepHours * 1.01) pointSpeed = slowSpeedKnots;
+
     if (!inDarkPeriod) {
       track.push(
         makeTrackPoint(
@@ -216,11 +232,14 @@ function buildTrack({
           jittered.lat,
           jittered.lon,
           ((heading % 360) + 360) % 360,
-          speedKnots
+          pointSpeed
         )
       );
     }
   }
+
+  const observedWindowHours = (TRACK_POINTS - 1) * stepHours;
+  const closestFromStartHours = (closestTimeMs - startMs) / 3600000;
 
   return {
     name,
@@ -229,7 +248,26 @@ function buildTrack({
     track,
     darkPeriodHours:
       darkDurationHours || 0,
+    darkStartHours: darkStartHours ?? null,
+    speedAnomaly: !!speedAnomaly,
+    speedAnomalyFromKnots: speedAnomaly ? speedKnots : null,
+    speedAnomalyToKnots: speedAnomaly ? slowSpeedKnots : null,
+    loiterHours: loiterHours || 0,
+    // Behaviour-flag positions, all expressed as hours-from-observation-
+    // window-start, so the UI can lay them directly onto one timeline.
+    timeline: {
+      totalHours: observedWindowHours,
+      darkStartHours: darkStartHours ?? null,
+      darkDurationHours: darkDurationHours || 0,
+      loiterStartHours: loiterHours > 0 ? clampHours(closestFromStartHours - loiterHours / 2, observedWindowHours) : null,
+      loiterDurationHours: loiterHours || 0,
+      speedAnomalyAtHours: speedAnomaly ? clampHours(closestFromStartHours, observedWindowHours) : null,
+    },
   };
+}
+
+function clampHours(h, max) {
+  return Math.min(max, Math.max(0, h));
 }
 
 function interpolateClosestApproach(
@@ -286,6 +324,45 @@ function timeDifferenceToReleaseHours(
     (time - releaseEndMs) /
     3600000
   );
+}
+
+function relJitter(rng, value, pct) {
+  return value * (1 + rng.randFloat(-pct, pct, 3));
+}
+
+// Perturbs every scenario archetype's geometry (bearing, distance, timing,
+// speed, and behaviour-flag durations) so no two triggered incidents place
+// a vessel at literally identical numbers — while clamping distance/timing
+// so a role never accidentally crosses the plausibility thresholds
+// (MAX_RADIUS_KM / MAX_TIME_DIFF_HOURS) that define its intended outcome
+// (a "strong match" should never jitter into implausible, and a
+// "spatial-miss" should never accidentally jitter into plausible).
+function jitterArchetype(rng, a) {
+  const distance = Math.max(0.4, relJitter(rng, a.closestDistanceKm, 0.18));
+  const offset = a.closestOffsetHours + rng.randFloat(-2.5, 2.5, 1);
+
+  // Only the two archetypes whose base geometry itself already flexes
+  // (strong/secondary-match, tightened when unknownSourceScenario is
+  // active) need a safety clamp — everything else's jitter range was
+  // chosen to never cross MAX_RADIUS_KM/MAX_TIME_DIFF_HOURS in the first
+  // place.
+  const clampedDistance = a.role === 'strong-match' || a.role === 'secondary-match'
+    ? Math.min(distance, MAX_RADIUS_KM - 2)
+    : distance;
+  const clampedOffset = a.role === 'strong-match' || a.role === 'secondary-match'
+    ? Math.max(-(MAX_TIME_DIFF_HOURS - 1), Math.min(MAX_TIME_DIFF_HOURS - 1, offset))
+    : offset;
+
+  return {
+    ...a,
+    bearing: (a.bearing + rng.randFloat(-10, 10, 1) + 360) % 360,
+    closestDistanceKm: parseFloat(clampedDistance.toFixed(2)),
+    closestOffsetHours: parseFloat(clampedOffset.toFixed(1)),
+    speedKnots: parseFloat(Math.max(2, relJitter(rng, a.speedKnots, 0.15)).toFixed(1)),
+    darkDurationHours: a.darkDurationHours > 0 ? parseFloat(Math.max(2, relJitter(rng, a.darkDurationHours, 0.3)).toFixed(1)) : 0,
+    darkStartHours: a.darkStartHours != null ? Math.max(0, parseFloat((a.darkStartHours + rng.randFloat(-3, 3, 1)).toFixed(1))) : null,
+    loiterHours: a.loiterHours > 0 ? parseFloat(Math.max(1, relJitter(rng, a.loiterHours, 0.25)).toFixed(1)) : 0,
+  };
 }
 
 function evaluateTrack(
@@ -373,10 +450,15 @@ function evaluateTrack(
     1
   );
 
-  // AIS silence is evidence of reduced observability,
-  // not proof of wrongdoing.
+  // AIS silence, an abrupt slow-down right at closest approach, and
+  // loitering near the origin window are the three behavioural red flags
+  // called out in the problem statement — each is weighted by how
+  // suspicious it is on its own, not just summed uncritically.
+  const gapScore = clamp(vessel.darkPeriodHours / 24, 0, 1);
+  const speedAnomalyScore = vessel.speedAnomaly ? 0.75 : 0;
+  const loiterScore = clamp((vessel.loiterHours || 0) / 10, 0, 1);
   const behaviouralScore = clamp(
-    vessel.darkPeriodHours / 24,
+    0.5 * gapScore + 0.3 * speedAnomalyScore + 0.2 * loiterScore,
     0,
     1
   );
@@ -419,6 +501,12 @@ function evaluateTrack(
         1
       ),
 
+    speedAnomaly: vessel.speedAnomaly,
+    speedAnomalyFromKnots: vessel.speedAnomalyFromKnots,
+    speedAnomalyToKnots: vessel.speedAnomalyToKnots,
+    loiterHours: toFixedNumber(vessel.loiterHours || 0, 1),
+    timeline: vessel.timeline,
+
     spatialScore:
   toFixedNumber(
     spatialScore,
@@ -437,7 +525,7 @@ behaviouralScore:
     4
   ),
 
-sarMatchScore:
+headingScore:
   toFixedNumber(
     trajectoryScore,
     4
@@ -479,6 +567,12 @@ export function identifyVessels({
     )
   );
 
+  // ~28% of incidents: no vessel genuinely matches well — the illegal
+  // discharge vessel simply wasn't transmitting usable AIS, or this
+  // wasn't a vessel source at all. Decided purely from the seed, so it's
+  // reproducible, not from a real absence of data.
+  const unknownSourceScenario = rng.rand() < 0.28;
+
   const windowStart =
     new Date(
       aisSource?.window?.start ??
@@ -500,25 +594,34 @@ export function identifyVessels({
       releaseEndMs) /
     2;
 
+  // Every archetype below also gets a seeded jitter pass (jitterArchetype)
+  // before building tracks — without it, "strong-match" would land at
+  // *exactly* the same 5km/0h geometry on every single triggered incident,
+  // which reads as suspiciously repetitive rather than like independent
+  // AIS tracks.
   const archetypes = [
     {
       role: 'strong-match',
       bearing: 35,
-      closestDistanceKm: 5,
-      closestOffsetHours: 0,
+      closestDistanceKm: unknownSourceScenario ? rng.randFloat(28, 40, 1) : 5,
+      closestOffsetHours: unknownSourceScenario ? rng.randFloat(11, 19, 1) : 0,
       speedKnots: 11,
       darkStartHours: null,
       darkDurationHours: 0,
+      speedAnomaly: true, // sharp slow-down right at closest approach — classic discharge-maneuvering signature
+      loiterHours: 0,
     },
 
     {
       role: 'secondary-match',
       bearing: 120,
-      closestDistanceKm: 13,
-      closestOffsetHours: 5,
+      closestDistanceKm: unknownSourceScenario ? rng.randFloat(33, 44, 1) : 13,
+      closestOffsetHours: unknownSourceScenario ? rng.randFloat(-21, -11, 1) : 5,
       speedKnots: 13,
       darkStartHours: null,
       darkDurationHours: 0,
+      speedAnomaly: false,
+      loiterHours: unknownSourceScenario ? 0 : 5, // circled near the origin for ~5h
     },
 
     {
@@ -529,6 +632,8 @@ export function identifyVessels({
       speedKnots: 10,
       darkStartHours: null,
       darkDurationHours: 0,
+      speedAnomaly: false,
+      loiterHours: 0,
     },
 
     {
@@ -539,6 +644,8 @@ export function identifyVessels({
       speedKnots: 12,
       darkStartHours: 22,
       darkDurationHours: 8,
+      speedAnomaly: false,
+      loiterHours: 0,
     },
 
     {
@@ -549,6 +656,8 @@ export function identifyVessels({
       speedKnots: 9,
       darkStartHours: null,
       darkDurationHours: 0,
+      speedAnomaly: false,
+      loiterHours: 0,
     },
 
     {
@@ -559,6 +668,8 @@ export function identifyVessels({
       speedKnots: 14,
       darkStartHours: null,
       darkDurationHours: 0,
+      speedAnomaly: false,
+      loiterHours: 0,
     },
 
     {
@@ -569,6 +680,8 @@ export function identifyVessels({
       speedKnots: 12,
       darkStartHours: null,
       darkDurationHours: 0,
+      speedAnomaly: false,
+      loiterHours: 0,
     },
 
     {
@@ -579,6 +692,8 @@ export function identifyVessels({
       speedKnots: 16,
       darkStartHours: null,
       darkDurationHours: 0,
+      speedAnomaly: false,
+      loiterHours: 0,
     },
 
     {
@@ -589,11 +704,14 @@ export function identifyVessels({
       speedKnots: 8,
       darkStartHours: null,
       darkDurationHours: 0,
+      speedAnomaly: false,
+      loiterHours: 0,
     },
   ];
 
   const tracks =
     archetypes
+      .map((spec) => jitterArchetype(rng, spec))
       .slice(0, TRACK_COUNT)
       .map((spec, index) => {
         return buildTrack({

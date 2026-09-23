@@ -11,8 +11,16 @@ export default function Section1_IncidentTrigger({ data, status }) {
             <div className="flex items-center gap-2">
               <span className="text-[#D97706]">⚠</span>
               <span className="text-sm font-semibold text-[#D97706] uppercase tracking-wider">SAR-Pass Alert</span>
+              {data.source === 'reported' && (
+                <span className="rounded-full border border-[#A5F3FC] bg-[#ECFEFF] px-2 py-0.5 text-[10px] font-semibold text-[#0E7490]">
+                  📍 Reported Zone
+                </span>
+              )}
             </div>
             <h3 className="mt-1 text-xl font-bold text-[#1A1D23] mono">{data.incidentId}</h3>
+            {data.reportNotes && (
+              <p className="mt-1 max-w-md text-xs italic text-[#6B7280]">"{data.reportNotes}"</p>
+            )}
           </div>
           <span className="mono text-xs text-[#6B7280]">
             {new Date(data.timestamp).toLocaleString('en-US', { hour12: false })}

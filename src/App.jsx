@@ -1,6 +1,9 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { MapContainer, TileLayer } from 'react-leaflet';
 import { generateIncident } from './data/generateIncident';
+import { investigateReport } from './data/generateReportedScan';
+import ReportSpillModal from './components/ReportSpillModal';
+import CleanScanResult from './components/CleanScanResult';
 import Section1_IncidentTrigger from './components/Section1_IncidentTrigger';
 import Section2_DataIngestion from './components/Section2_DataIngestion';
 import Section3_SlickAnalysis from './components/Section3_SlickAnalysis';
@@ -98,6 +101,7 @@ function App() {
   const [speed, setSpeed] = useState(2000);
   const [log, setLog] = useState([]);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [reportModalOpen, setReportModalOpen] = useState(false);
   const [logoHover, setLogoHover] = useState(false);
   const logEndRef = useRef(null);
   const autoPlayRef = useRef(null);
@@ -143,6 +147,31 @@ function App() {
       `New incident ${data.incidentId} — ${data.satellite} SAR pass over ${data.region} (scene ${data.sceneId}), coordinates ${data.coordinates.lat}°N, ${data.coordinates.lon}°E`
     );
   }, [appendLog]);
+
+  const submitReport = useCallback(
+    ({ lat, lon, notes }) => {
+      const data = investigateReport({ lat, lon, notes });
+      setIncident(data);
+      setActiveStage(data.falseAlarm ? -1 : -1);
+      setStageStatuses(Array(7).fill('Pending'));
+      setAutoPlay(false);
+      setLog([]);
+      setMenuOpen(false);
+      setReportModalOpen(false);
+      if (data.falseAlarm) {
+        appendLog(
+          0,
+          `Reported zone ${lat}°N, ${lon}°E investigated — ${data.scanSatellite} pass, ${data.scanAreaKm2.toLocaleString()} km² scanned, no anomaly found`
+        );
+      } else {
+        appendLog(
+          0,
+          `Reported zone confirmed: incident ${data.incidentId} — ${data.satellite} SAR pass near ${lat}°N, ${lon}°E (scene ${data.sceneId})`
+        );
+      }
+    },
+    [appendLog]
+  );
 
   const advanceStage = useCallback(() => {
     setActiveStage((prev) => {
@@ -296,6 +325,13 @@ function App() {
             </div>
 
             <button
+              onClick={() => setReportModalOpen(true)}
+              className="rounded-lg border border-[#E2E5EA] bg-white px-4 py-2 text-xs font-semibold text-[#374151] hover:bg-gray-50 transition-colors"
+            >
+              📍 Report a Spill
+            </button>
+
+            <button
               onClick={triggerIncident}
               className="rounded-lg bg-[#0EA5B7] px-4 py-2 text-xs font-semibold text-white hover:bg-[#0e8fa0] transition-colors"
             >
@@ -325,8 +361,7 @@ function App() {
                   keyboard={false}
                   attributionControl={false}
                 >
-                  <TileLayer url="https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Base/MapServer/tile/{z}/{y}/{x}" />
-<TileLayer url="https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Reference/MapServer/tile/{z}/{y}/{x}" />
+                  <TileLayer url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png" />
                 </MapContainer>
                 {/* Dimming scrim — matches page bg for calm atmosphere */}
                 <div className="absolute inset-0 bg-[#F7F8FA]/[0.35]" />
@@ -349,14 +384,21 @@ function App() {
                   </div>
 
                   <p className="mb-6 text-sm leading-relaxed text-[#6B7280]">
-                    Click below to generate a synthetic maritime oil-spill scenario and begin the analysis pipeline.
+                    Trigger a synthetic incident to see the full pipeline run automatically, or report a specific zone to have the system investigate it.
                   </p>
 
                   <button
                     onClick={triggerIncident}
-                    className="mb-6 w-full rounded-lg bg-[#0EA5B7] px-4 py-2.5 text-sm font-semibold text-white hover:bg-[#0e8fa0] transition-colors"
+                    className="mb-3 w-full rounded-lg bg-[#0EA5B7] px-4 py-2.5 text-sm font-semibold text-white hover:bg-[#0e8fa0] transition-colors"
                   >
                     ⚡ Trigger Incident
+                  </button>
+
+                  <button
+                    onClick={() => setReportModalOpen(true)}
+                    className="mb-6 w-full rounded-lg border border-[#E2E5EA] bg-white px-4 py-2.5 text-sm font-semibold text-[#374151] hover:bg-gray-50 transition-colors"
+                  >
+                    📍 Report a Spill
                   </button>
 
                   {/* System status */}
@@ -376,6 +418,8 @@ function App() {
                 </div>
               </div>
             </div>
+          ) : incident.falseAlarm ? (
+            <CleanScanResult data={incident} onReportAnother={() => setReportModalOpen(true)} />
           ) : (
             <div className="space-y-4 p-4 lg:p-6">
               <Section1_IncidentTrigger data={incident} status={stageStatuses[0]} />
@@ -425,6 +469,10 @@ function App() {
           </div>
         </aside>
       </div>
+
+      {reportModalOpen && (
+        <ReportSpillModal onClose={() => setReportModalOpen(false)} onSubmit={submitReport} />
+      )}
     </div>
   );
 }

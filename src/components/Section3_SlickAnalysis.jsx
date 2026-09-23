@@ -27,6 +27,27 @@ function paintBase(ctx, raster) {
   ctx.drawImage(off, 0, 0, CANVAS_PX, CANVAS_PX);
 }
 
+// Same as paintBase but for the EO sensor's RGB raster (true-colour optical
+// instead of grayscale radar backscatter).
+function paintBaseRGB(ctx, raster) {
+  const { rgb, gridSize } = raster;
+  const off = document.createElement('canvas');
+  off.width = gridSize;
+  off.height = gridSize;
+  const offCtx = off.getContext('2d');
+  const imgData = offCtx.createImageData(gridSize, gridSize);
+  for (let i = 0; i < gridSize * gridSize; i++) {
+    imgData.data[i * 4] = rgb[i * 3];
+    imgData.data[i * 4 + 1] = rgb[i * 3 + 1];
+    imgData.data[i * 4 + 2] = rgb[i * 3 + 2];
+    imgData.data[i * 4 + 3] = 255;
+  }
+  offCtx.putImageData(imgData, 0, 0);
+  ctx.imageSmoothingEnabled = true;
+  ctx.clearRect(0, 0, CANVAS_PX, CANVAS_PX);
+  ctx.drawImage(off, 0, 0, CANVAS_PX, CANVAS_PX);
+}
+
 function paintPolygon(ctx, points, scale, { fill, stroke, dash, lineWidth = 1.5 }) {
   if (!points || !points.length) return;
   ctx.beginPath();
@@ -135,6 +156,57 @@ function SarPanel({ raster, mode, showLookalike, acquisitionLabel }) {
   );
 }
 
+function EoPanel({ eo, acquisitionLabel }) {
+  const canvasRef = useRef(null);
+  const raster = eo.raster;
+  const scale = raster ? CANVAS_PX / raster.gridSize : 1;
+
+  useEffect(() => {
+    if (!raster) return;
+    const ctx = canvasRef.current?.getContext('2d');
+    if (!ctx) return;
+    paintBaseRGB(ctx, raster);
+    raster.vessels.forEach((v) => {
+      const x = v.px.x * scale;
+      const y = v.px.y * scale;
+      paintVesselGlow(ctx, x, y, 7, 'rgba(255,255,255,0.9)');
+    });
+    paintPolygon(ctx, raster.slickPolygonPx, scale, {
+      stroke: eo.agreement ? '#F87171' : '#FDE68A',
+      dash: eo.agreement ? [] : [5, 4],
+      lineWidth: 1.75,
+    });
+  }, [raster, scale, eo.agreement]);
+
+  if (!eo.available) {
+    return (
+      <div className="relative flex aspect-square w-full flex-col items-center justify-center gap-2 overflow-hidden rounded-lg border border-[#1F2937] bg-[#0B0F14] px-4 text-center">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#4B5563" strokeWidth="1.5" className="opacity-70">
+          <path d="M17.5 19H6.5A4.5 4.5 0 0 1 6.5 10a5.5 5.5 0 0 1 10.6-1.9A4 4 0 0 1 17.5 19z" />
+        </svg>
+        <p className="text-[10px] font-semibold uppercase tracking-wider text-[#6B7280]">EO Unavailable</p>
+        <p className="text-[10px] text-[#9CA3AF]">{eo.reason}</p>
+        <p className="mono text-[9px] text-[#4B5563]">{eo.satellite}</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="relative aspect-square w-full overflow-hidden rounded-lg border border-[#1F2937] bg-black">
+      <canvas ref={canvasRef} width={CANVAS_PX} height={CANVAS_PX} className="h-full w-full" />
+      <div className="mono absolute left-2 top-2 rounded bg-black/60 px-1.5 py-0.5 text-[10px] text-[#E5E7EB]">
+        {acquisitionLabel}
+      </div>
+      <div className="absolute right-2 top-2 rounded bg-black/60 px-1.5 py-0.5 text-[9px] text-[#E5E7EB]">
+        {eo.satellite}
+      </div>
+      <div className={`absolute bottom-2 left-2 rounded px-1.5 py-0.5 text-[9px] font-semibold ${eo.agreement ? 'bg-red-900/70 text-red-200' : 'bg-amber-900/70 text-amber-200'}`}>
+        {eo.agreement ? 'Confirms Oil Signature' : 'Inconclusive'}
+      </div>
+    </div>
+  );
+}
+
 export default function Section3_SlickAnalysis({ data, status }) {
   const [showOverlay, setShowOverlay] = useState(false);
 
@@ -153,6 +225,11 @@ export default function Section3_SlickAnalysis({ data, status }) {
   const acquisitionLabel = new Date(data.acquisitionTime).toLocaleString('en-GB', {
     day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', timeZone: 'UTC', hour12: false,
   }) + ' UTC';
+  const eoAcquisitionLabel = data.eoValidation?.acquisitionTime
+    ? new Date(data.eoValidation.acquisitionTime).toLocaleString('en-GB', {
+        day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', timeZone: 'UTC', hour12: false,
+      }) + ' UTC'
+    : '';
 
   return (
     <SectionCard number={3} title="Slick Analysis" status={status}>
@@ -172,7 +249,7 @@ export default function Section3_SlickAnalysis({ data, status }) {
             </label>
           </div>
 
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
             <div className="space-y-1">
               <span className="text-[10px] font-semibold text-[#9CA3AF] uppercase tracking-wider">A · Original SAR Scene</span>
               <SarPanel raster={raster} mode="raw" showLookalike={false} acquisitionLabel={acquisitionLabel} />
@@ -180,6 +257,10 @@ export default function Section3_SlickAnalysis({ data, status }) {
             <div className="space-y-1">
               <span className="text-[10px] font-semibold text-[#9CA3AF] uppercase tracking-wider">B · Detected Oil Slick (Overlay)</span>
               <SarPanel raster={raster} mode="detected" showLookalike={showOverlay} acquisitionLabel={acquisitionLabel} />
+            </div>
+            <div className="col-span-2 space-y-1 sm:col-span-1">
+              <span className="text-[10px] font-semibold text-[#9CA3AF] uppercase tracking-wider">C · Electro-Optical Validation</span>
+              <EoPanel eo={data.eoValidation} acquisitionLabel={eoAcquisitionLabel} />
             </div>
           </div>
 
@@ -204,6 +285,15 @@ export default function Section3_SlickAnalysis({ data, status }) {
             <ConfidenceBar label="Look-Alike" value={data.classification.lookalike} color="#D97706" />
             <ConfidenceBar label="Clean" value={data.classification.clean} color="#16A34A" />
             <ConfidenceBar label="Unknown" value={data.classification.unknown} color="#9CA3AF" />
+            <div className="mt-1 border-t border-[#E2E5EA] pt-2 text-[10px]">
+              {data.eoValidation?.available ? (
+                <span className={data.eoValidation.agreement ? 'text-[#DC2626]' : 'text-[#D97706]'}>
+                  ● EO {data.eoValidation.agreement ? 'confirms' : 'inconclusive on'} oil signature ({data.eoValidation.satellite})
+                </span>
+              ) : (
+                <span className="text-[#9CA3AF]">● EO unavailable — {data.eoValidation?.reason}</span>
+              )}
+            </div>
           </div>
 
           <div className="rounded-lg border border-[#E2E5EA] bg-[#F9FAFB] p-4">
@@ -229,6 +319,35 @@ export default function Section3_SlickAnalysis({ data, status }) {
                 <span className="text-xs text-[#9CA3AF]">Perimeter</span>
                 <p className="mono text-sm text-[#374151]">{data.slick.perimeter} m</p>
               </div>
+            </div>
+          </div>
+
+          <div className="rounded-lg border border-[#E2E5EA] bg-[#F9FAFB] p-4">
+            <span className="text-xs font-semibold text-[#6B7280] uppercase tracking-wider">Spill Age Estimate</span>
+            <p className="mt-0.5 text-[10px] text-[#9CA3AF]">Bonn Appearance Code {data.spillAge.appearanceCode} — {data.spillAge.appearanceLabel}, independent of Step 4</p>
+            <div className="mt-2 grid grid-cols-2 gap-3">
+              <div>
+                <span className="text-xs text-[#9CA3AF]">Estimated Age</span>
+                <p className="mono text-sm text-[#374151]">{data.spillAge.ageHours}h</p>
+                <p className="text-[10px] text-[#9CA3AF]">range {data.spillAge.ageRangeHours[0]}–{data.spillAge.ageRangeHours[1]}h</p>
+              </div>
+              <div>
+                <span className="text-xs text-[#9CA3AF]">Weathering Stage</span>
+                <p className="text-sm text-[#374151]">{data.spillAge.weatheringStage}</p>
+              </div>
+              <div>
+                <span className="text-xs text-[#9CA3AF]">Est. Thickness</span>
+                <p className="mono text-sm text-[#374151]">{data.spillAge.thicknessUsedMm} mm</p>
+              </div>
+              <div>
+                <span className="text-xs text-[#9CA3AF]">Est. Volume</span>
+                <p className="mono text-sm text-[#374151]">{data.spillAge.estimatedVolumeM3.toLocaleString()} m³</p>
+              </div>
+            </div>
+            <div className={`mt-2 rounded border px-2 py-1 text-[10px] ${data.spillAge.agreesWithHindcast ? 'border-green-200 bg-green-50 text-green-700' : 'border-amber-200 bg-amber-50 text-amber-700'}`}>
+              {data.spillAge.agreesWithHindcast
+                ? `✓ Corroborates Step 4 hindcast (~${data.spillAge.hindcastAgeHours}h)`
+                : `~ Differs from Step 4 hindcast (~${data.spillAge.hindcastAgeHours}h) — worth re-checking`}
             </div>
           </div>
 
