@@ -17,7 +17,7 @@ const QUICK_ZONES = [
 
 const markerIcon = L.divIcon({
   className: '',
-  html: '<div style="width:16px;height:16px;border-radius:50%;background:#DC2626;border:2px solid white;box-shadow:0 0 0 3px rgba(220,38,38,0.35);"></div>',
+  html: '<div style="width:16px;height:16px;border-radius:50%;background:#C7464F;border:2px solid white;box-shadow:0 0 0 3px rgba(220,38,38,0.35);"></div>',
   iconSize: [16, 16],
   iconAnchor: [8, 8],
 });
@@ -63,25 +63,26 @@ export default function ReportSpillModal({ onClose, onSubmit }) {
   return (
     <div className="fixed inset-0 z-[1000] flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
       <div
-        className="max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-2xl border border-[#E2E5EA] bg-white p-6"
-        style={{ boxShadow: '0 8px 24px rgba(0,0,0,0.2)' }}
+        className="max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-lg border border-[#D3DEE4] bg-white"
+        style={{ boxShadow: '0 4px 16px rgba(18,52,74,0.12)' }}
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="mb-4 flex items-start justify-between">
+        <div className="flex items-start justify-between border-b border-[#D3DEE4] bg-[#EDF3F6] px-5 py-3">
           <div>
-            <h2 className="text-lg font-bold text-[#1A1D23]">📍 Report a Spill</h2>
-            <p className="mt-0.5 text-xs text-[#6B7280]">
+            <h2 className="text-xs font-bold uppercase tracking-wider text-[#12344A]">📍 Report a Spill — New Investigation</h2>
+            <p className="mt-0.5 text-[11px] text-[#607580]">
               Flag a zone for investigation — the system scans it and reports what it actually finds, including a clean result.
             </p>
           </div>
-          <button onClick={onClose} className="text-[#9CA3AF] hover:text-[#374151]">✕</button>
+          <button onClick={onClose} className="text-[#8497A3] hover:text-[#172A35]">✕</button>
         </div>
 
+        <div className="p-5">
         <div className="grid gap-4 sm:grid-cols-2">
           {/* Map picker */}
           <div>
-            <span className="text-xs font-semibold text-[#6B7280] uppercase tracking-wider">Click Map to Drop Pin</span>
-            <div className="mt-1.5 h-[220px] overflow-hidden rounded-lg border border-[#E2E5EA]">
+            <span className="text-xs font-semibold text-[#607580] uppercase tracking-wider">Click Map to Drop Pin</span>
+            <div className="mt-1.5 h-[220px] overflow-hidden rounded-lg border border-[#D3DEE4]">
               <MapContainer center={[17.5, 74]} zoom={5} style={{ height: '100%', width: '100%' }} scrollWheelZoom>
                 <TileLayer
                   url="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
@@ -96,7 +97,7 @@ export default function ReportSpillModal({ onClose, onSubmit }) {
           {/* Manual entry + quick zones */}
           <div className="space-y-3">
             <div>
-              <span className="text-xs font-semibold text-[#6B7280] uppercase tracking-wider">Or Enter Coordinates</span>
+              <span className="text-xs font-semibold text-[#607580] uppercase tracking-wider">Or Enter Coordinates</span>
               <div className="mt-1.5 flex gap-2">
                 <input
                   type="text"
@@ -104,7 +105,7 @@ export default function ReportSpillModal({ onClose, onSubmit }) {
                   value={latText}
                   onChange={(e) => setLatText(e.target.value)}
                   onBlur={applyManualCoords}
-                  className="w-full rounded-lg border border-[#E2E5EA] px-2.5 py-1.5 text-xs"
+                  className="w-full rounded-lg border border-[#D3DEE4] px-2.5 py-1.5 text-xs"
                 />
                 <input
                   type="text"
@@ -112,19 +113,19 @@ export default function ReportSpillModal({ onClose, onSubmit }) {
                   value={lonText}
                   onChange={(e) => setLonText(e.target.value)}
                   onBlur={applyManualCoords}
-                  className="w-full rounded-lg border border-[#E2E5EA] px-2.5 py-1.5 text-xs"
+                  className="w-full rounded-lg border border-[#D3DEE4] px-2.5 py-1.5 text-xs"
                 />
               </div>
             </div>
 
             <div>
-              <span className="text-xs font-semibold text-[#6B7280] uppercase tracking-wider">Or Pick a Known Zone</span>
+              <span className="text-xs font-semibold text-[#607580] uppercase tracking-wider">Or Pick a Known Zone</span>
               <input
                 type="text"
                 placeholder="Search port/zone..."
                 value={zoneQuery}
                 onChange={(e) => setZoneQuery(e.target.value)}
-                className="mt-1.5 w-full rounded-lg border border-[#E2E5EA] px-2.5 py-1.5 text-xs"
+                className="mt-1.5 w-full rounded-lg border border-[#D3DEE4] px-2.5 py-1.5 text-xs"
               />
               <div className="mt-1.5 max-h-[92px] space-y-0.5 overflow-y-auto">
                 {filteredZones.map((z) => {
@@ -133,41 +134,42 @@ export default function ReportSpillModal({ onClose, onSubmit }) {
                     <button
                       key={z.name}
                       onClick={() => applyPick({ lat: z.lat, lon: z.lon })}
-                      className={`block w-full rounded px-2 py-1 text-left text-xs hover:bg-gray-50 ${active ? 'bg-[#ECFEFF] text-[#0E7490]' : 'text-[#374151]'}`}
+                      className={`block w-full rounded px-2 py-1 text-left text-xs hover:bg-gray-50 ${active ? 'bg-[#EAF4FA] text-[#12344A]' : 'text-[#172A35]'}`}
                     >
-                      {z.name} <span className="mono text-[#9CA3AF]">({z.lat}, {z.lon})</span>
+                      {z.name} <span className="mono text-[#8497A3]">({z.lat}, {z.lon})</span>
                     </button>
                   );
                 })}
-                {filteredZones.length === 0 && <p className="px-2 py-1 text-xs text-[#9CA3AF]">No matches</p>}
+                {filteredZones.length === 0 && <p className="px-2 py-1 text-xs text-[#8497A3]">No matches</p>}
               </div>
             </div>
           </div>
         </div>
 
         <div className="mt-4">
-          <span className="text-xs font-semibold text-[#6B7280] uppercase tracking-wider">Notes (optional)</span>
+          <span className="text-xs font-semibold text-[#607580] uppercase tracking-wider">Notes (optional)</span>
           <textarea
             value={notes}
             onChange={(e) => setNotes(e.target.value)}
             placeholder="e.g. Fishing crew reported a sheen near the outer anchorage this morning..."
             rows={2}
-            className="mt-1.5 w-full rounded-lg border border-[#E2E5EA] px-2.5 py-1.5 text-xs"
+            className="mt-1.5 w-full rounded-lg border border-[#D3DEE4] px-2.5 py-1.5 text-xs"
           />
         </div>
+        </div>
 
-        <div className="mt-5 flex items-center justify-between border-t border-[#F3F4F6] pt-4">
-          <span className="mono text-xs text-[#6B7280]">
+        <div className="flex items-center justify-between border-t border-[#D3DEE4] bg-[#EDF3F6] px-5 py-3">
+          <span className="mono text-xs text-[#607580]">
             {picked ? `Selected: ${picked.lat}°N, ${picked.lon}°E` : 'No location selected yet'}
           </span>
           <div className="flex gap-2">
-            <button onClick={onClose} className="rounded-lg border border-[#E2E5EA] px-4 py-2 text-xs font-semibold text-[#6B7280] hover:bg-gray-50">
+            <button onClick={onClose} className="rounded-lg border border-[#D3DEE4] px-4 py-2 text-xs font-semibold text-[#607580] hover:bg-gray-50">
               Cancel
             </button>
             <button
               onClick={() => canSubmit && onSubmit({ lat: picked.lat, lon: picked.lon, notes })}
               disabled={!canSubmit}
-              className="rounded-lg bg-[#0EA5B7] px-4 py-2 text-xs font-semibold text-white hover:bg-[#0e8fa0] disabled:cursor-not-allowed disabled:opacity-40"
+              className="rounded-lg bg-[#167EAD] px-4 py-2 text-xs font-semibold text-white hover:bg-[#125E80] disabled:cursor-not-allowed disabled:opacity-40"
             >
               🔍 Investigate
             </button>

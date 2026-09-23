@@ -2,19 +2,24 @@
 
 @layer base {
   :root {
-    --cyan: #0EA5B7;
-    --cyan-dim: #0e7490;
-    --amber: #d97706;
-    --red: #dc2626;
-    --teal: #0d9488;
-    --page-bg: #F7F8FA;
+    --ocean-blue: #167EAD;
+    --ocean-cyan: #22A5C7;
+    --deep-navy: #12344A;
+    --dark-navy: #0B2538;
+    --amber: #B77B18;
+    --red: #C7464F;
+    --green: #287A5D;
+    --page-bg: #F3F6F8;
+    --page-bg-secondary: #EDF3F6;
     --card-bg: #FFFFFF;
-    --card-border: #E2E5EA;
-    --text-primary: #1A1D23;
-    --text-secondary: #6B7280;
-    --text-dim: #9CA3AF;
+    --card-bg-secondary: #EDF3F6;
+    --card-border: #D3DEE4;
+    --card-border-strong: #B9CBD5;
+    --text-primary: #172A35;
+    --text-secondary: #607580;
+    --text-dim: #8497A3;
     --panel-bg: #FFFFFF;
-    --panel-border: #E2E5EA;
+    --panel-border: #D3DEE4;
   }
 }
 
@@ -43,18 +48,18 @@
 
   /* Leaflet overrides for light theme */
   .leaflet-container {
-    background: #e5e7eb !important;
+    background: #D3DEE4 !important;
     border-radius: 8px;
   }
   .leaflet-control-zoom a {
     background: #ffffff !important;
-    color: #1A1D23 !important;
-    border-color: #E2E5EA !important;
+    color: #172A35 !important;
+    border-color: #D3DEE4 !important;
   }
   .leaflet-popup-content-wrapper {
     background: #ffffff !important;
-    color: #1A1D23 !important;
-    border: 1px solid #E2E5EA;
+    color: #172A35 !important;
+    border: 1px solid #D3DEE4;
   }
   .leaflet-popup-tip {
     background: #ffffff !important;
