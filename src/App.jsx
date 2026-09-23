@@ -112,7 +112,6 @@ function App() {
   const [autoPlay, setAutoPlay] = useState(false);
   const [speed, setSpeed] = useState(2000);
   const [log, setLog] = useState([]);
-  const [menuOpen, setMenuOpen] = useState(false);
   const [reportModalOpen, setReportModalOpen] = useState(false);
   const [tourOpen, setTourOpen] = useState(false);
   const [mapView, setMapView] = useState('hindcast');
@@ -130,19 +129,6 @@ function App() {
   }, []);
   const logContainerRef = useRef(null);
   const autoPlayRef = useRef(null);
-  const menuRef = useRef(null);
-
-  // Close menu on outside click
-  useEffect(() => {
-    if (!menuOpen) return;
-    function handleClick(e) {
-      if (menuRef.current && !menuRef.current.contains(e.target)) {
-        setMenuOpen(false);
-      }
-    }
-    document.addEventListener('mousedown', handleClick);
-    return () => document.removeEventListener('mousedown', handleClick);
-  }, [menuOpen]);
 
   const appendLog = useCallback(
     (stageIdx, message) => {
@@ -171,7 +157,6 @@ function App() {
     setStageStatuses(Array(7).fill('Pending'));
     setAutoPlay(false);
     setLog([]);
-    setMenuOpen(false);
     appendLog(
       0,
       `New incident ${data.incidentId} — ${data.satellite} SAR pass over ${data.region} (scene ${data.sceneId}), coordinates ${data.coordinates.lat}°N, ${data.coordinates.lon}°E`
@@ -186,7 +171,6 @@ function App() {
       setStageStatuses(Array(7).fill('Pending'));
       setAutoPlay(false);
       setLog([]);
-      setMenuOpen(false);
       setReportModalOpen(false);
       if (data.falseAlarm) {
         appendLog(
@@ -300,79 +284,7 @@ function App() {
           </div>
 
           {/* Right controls */}
-          <div className="flex items-center gap-2 relative" ref={menuRef}>
-            <div className="relative">
-              <button
-                onClick={() => setMenuOpen((o) => !o)}
-                disabled={!incident}
-                className="flex h-9 w-9 items-center justify-center rounded-lg border border-[#D3DEE4] bg-white text-[#607580] hover:bg-gray-50 disabled:opacity-40 transition-colors"
-                title="Mission Control"
-              >
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <line x1="4" y1="21" x2="4" y2="14" />
-                  <line x1="4" y1="10" x2="4" y2="3" />
-                  <line x1="12" y1="21" x2="12" y2="12" />
-                  <line x1="12" y1="8" x2="12" y2="3" />
-                  <line x1="20" y1="21" x2="20" y2="16" />
-                  <line x1="20" y1="12" x2="20" y2="3" />
-                  <line x1="1" y1="14" x2="7" y2="14" />
-                  <line x1="9" y1="8" x2="15" y2="8" />
-                  <line x1="17" y1="16" x2="23" y2="16" />
-                </svg>
-              </button>
-
-              {menuOpen && (
-                <div className="absolute right-0 top-full mt-2 w-60 rounded-xl border border-[#D3DEE4] bg-white p-3 shadow-lg z-50">
-                  <p className="mb-2 text-[10px] font-semibold text-[#8497A3] uppercase tracking-wider">Mission Control</p>
-                  <div className="space-y-2">
-                    <button
-                      onClick={() => {
-                        if (autoPlay) {
-                          setAutoPlay(false);
-                        } else {
-                          if (activeStage >= 6) return;
-                          if (activeStage < 0) setActiveStage(0);
-                          else setAutoPlay(true);
-                        }
-                      }}
-                      disabled={!incident || activeStage >= 6}
-                      className="w-full rounded-lg border border-[#D3DEE4] bg-white px-3 py-2 text-left text-xs text-[#172A35] hover:bg-gray-50 disabled:opacity-40 transition-colors"
-                    >
-                      {autoPlay ? '⏸ Pause' : '▶ Auto-play'}
-                    </button>
-                    <button
-                      onClick={advanceStage}
-                      disabled={!incident || activeStage >= 6}
-                      className="w-full rounded-lg border border-[#D3DEE4] bg-white px-3 py-2 text-left text-xs text-[#172A35] hover:bg-gray-50 disabled:opacity-40 transition-colors"
-                    >
-                      ▶▶ Advance Stage
-                    </button>
-                    <button
-                      onClick={() => { reset(); setMenuOpen(false); }}
-                      className="w-full rounded-lg border border-[#D3DEE4] bg-white px-3 py-2 text-left text-xs text-[#172A35] hover:bg-gray-50 transition-colors"
-                    >
-                      ↻ Reset
-                    </button>
-                    <div className="border-t border-[#EDF3F6] pt-2 mt-1">
-                      <div className="flex items-center gap-2 px-1">
-                        <span className="text-[10px] text-[#607580]">Speed</span>
-                        <input
-                          type="range"
-                          min={500}
-                          max={5000}
-                          step={250}
-                          value={speed}
-                          onChange={(e) => setSpeed(Number(e.target.value))}
-                          className="flex-1 accent-[#167EAD]"
-                        />
-                        <span className="mono text-[10px] text-[#607580] w-10 text-right">{speed}ms</span>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              )}
-            </div>
-
+          <div className="flex items-center gap-2 relative">
             <button
               onClick={() => setTourOpen(true)}
               className="rounded-lg border border-[#D3DEE4] bg-white px-4 py-2 text-xs font-semibold text-[#607580] hover:bg-gray-50 transition-colors"
@@ -396,37 +308,89 @@ function App() {
           </div>
         </div>
 
-        {/* Pipeline stepper — reflects existing activeStage/stageStatuses state */}
+        {/* Pipeline stepper + playback controls — controls sit right next to
+            the thing they actually control, instead of a hidden menu */}
         {incident && !incident.falseAlarm && (
-          <div className="scrollbar-none flex items-center gap-1 overflow-x-auto border-t border-[#EDF3F6] px-3 py-2 lg:px-5">
-            {SHORT_STAGE_LABELS.map((label, i) => {
-              const st = stageStatuses[i];
-              const isDone = st === 'Complete';
-              const isCurrent = i === activeStage && !isDone;
-              return (
-                <div key={label} className="flex shrink-0 items-center gap-1">
-                  <div
-                    className={`flex h-5 w-5 items-center justify-center rounded-full text-[9px] font-bold mono ${
-                      isDone
-                        ? 'bg-[#287A5D] text-white'
-                        : isCurrent
-                        ? 'border-2 border-[#167EAD] text-[#167EAD]'
-                        : 'border border-[#D3DEE4] text-[#8497A3]'
-                    }`}
-                  >
-                    {isDone ? '✓' : i + 1}
+          <div className="flex items-center gap-3 border-t border-[#EDF3F6] px-3 py-2 lg:px-5">
+            <div className="scrollbar-none flex min-w-0 flex-1 items-center gap-1 overflow-x-auto">
+              {SHORT_STAGE_LABELS.map((label, i) => {
+                const st = stageStatuses[i];
+                const isDone = st === 'Complete';
+                const isCurrent = i === activeStage && !isDone;
+                return (
+                  <div key={label} className="flex shrink-0 items-center gap-1">
+                    <div
+                      className={`flex h-5 w-5 items-center justify-center rounded-full text-[9px] font-bold mono ${
+                        isDone
+                          ? 'bg-[#287A5D] text-white'
+                          : isCurrent
+                          ? 'border-2 border-[#167EAD] text-[#167EAD]'
+                          : 'border border-[#D3DEE4] text-[#8497A3]'
+                      }`}
+                    >
+                      {isDone ? '✓' : i + 1}
+                    </div>
+                    <span
+                      className={`mono text-[10px] font-semibold tracking-wide ${
+                        isDone || isCurrent ? 'text-[#172A35]' : 'text-[#8497A3]'
+                      }`}
+                    >
+                      {label}
+                    </span>
+                    {i < SHORT_STAGE_LABELS.length - 1 && <span className="mx-1 h-px w-4 shrink-0 bg-[#D3DEE4]" />}
                   </div>
-                  <span
-                    className={`mono text-[10px] font-semibold tracking-wide ${
-                      isDone || isCurrent ? 'text-[#172A35]' : 'text-[#8497A3]'
+                );
+              })}
+            </div>
+
+            {/* Playback controls — media-player style, always visible, no hidden menu */}
+            <div className="flex shrink-0 items-center gap-1 border-l border-[#EDF3F6] pl-3">
+              <button
+                onClick={() => { reset(); }}
+                title="Reset to start"
+                className="flex h-7 w-7 items-center justify-center rounded-md border border-[#D3DEE4] bg-white text-[#607580] hover:bg-gray-50 transition-colors"
+              >
+                <span className="text-xs">⏮</span>
+              </button>
+              <button
+                onClick={() => {
+                  if (autoPlay) {
+                    setAutoPlay(false);
+                  } else {
+                    if (activeStage >= 6) return;
+                    if (activeStage < 0) setActiveStage(0);
+                    else setAutoPlay(true);
+                  }
+                }}
+                disabled={activeStage >= 6}
+                title={autoPlay ? 'Pause' : 'Play'}
+                className="flex h-7 w-7 items-center justify-center rounded-md border border-[#D3DEE4] bg-white text-[#607580] hover:bg-gray-50 disabled:opacity-40 transition-colors"
+              >
+                <span className="text-xs">{autoPlay ? '⏸' : '▶'}</span>
+              </button>
+              <button
+                onClick={advanceStage}
+                disabled={activeStage >= 6}
+                title="Advance one stage"
+                className="flex h-7 w-7 items-center justify-center rounded-md border border-[#D3DEE4] bg-white text-[#607580] hover:bg-gray-50 disabled:opacity-40 transition-colors"
+              >
+                <span className="text-xs">⏭</span>
+              </button>
+
+              <div className="ml-1 flex items-center rounded-md border border-[#D3DEE4] bg-white p-0.5">
+                {[{ label: 'Slow', ms: 3500 }, { label: 'Normal', ms: 2000 }, { label: 'Fast', ms: 800 }].map((opt) => (
+                  <button
+                    key={opt.label}
+                    onClick={() => setSpeed(opt.ms)}
+                    className={`rounded px-2 py-1 text-[10px] font-semibold transition-colors ${
+                      speed === opt.ms ? 'bg-[#167EAD] text-white' : 'text-[#607580] hover:bg-gray-50'
                     }`}
                   >
-                    {label}
-                  </span>
-                  {i < SHORT_STAGE_LABELS.length - 1 && <span className="mx-1 h-px w-4 shrink-0 bg-[#D3DEE4]" />}
-                </div>
-              );
-            })}
+                    {opt.label}
+                  </button>
+                ))}
+              </div>
+            </div>
           </div>
         )}
       </header>
@@ -441,7 +405,7 @@ function App() {
               <div className="absolute inset-0 z-0">
                 <MapContainer
                   center={[17.5, 68.5]}
-                  zoom={6}
+                  zoom={5}
                   style={{ height: '100%', width: '100%' }}
                   scrollWheelZoom={false}
                   zoomControl={false}

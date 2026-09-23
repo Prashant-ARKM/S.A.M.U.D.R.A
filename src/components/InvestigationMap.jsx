@@ -105,7 +105,7 @@ export default function InvestigationMap({ data, view, onViewChange }) {
 
         <MapContainer
           center={[origin.lat, origin.lon]}
-          zoom={10}
+          zoom={9}
           style={{ height: '100%', width: '100%' }}
           scrollWheelZoom={false}
           attributionControl={true}
