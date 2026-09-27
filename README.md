@@ -23,7 +23,7 @@
 
 <div align="center">
 
-[![Watch the demo](https://img.youtube.com/vi/G-IyEcj6BLo/maxresdefault.jpg)](https://youtu.be/G-IyEcj6BLo)
+[![Watch the demo](https://img.youtube.com/vi/G-IyEcj6BLo/hqdefault.jpg)](https://youtu.be/G-IyEcj6BLo)
 
 *Click to watch the full walkthrough on YouTube*
 
@@ -50,13 +50,9 @@ S.A.M.U.D.R.A. is our answer: an end-to-end investigation pipeline, wrapped in a
 The system runs every incident through **seven investigation stages**, each visualized as its own step in an auditable pipeline:
 
 ```
-01 · INCIDENT     02 · DATA          03 · SLICK
-    TRIGGER    →     INGESTION    →     ANALYSIS
-                                            │
-   ┌────────────────────────────────────────┘
-   ▼
-04 · BACKWARD     05 · FORWARD       06 · VESSEL        07 · EVIDENCE
-   RECON       →     DRIFT TRACE  →     IDENTIFICATION →    FUSION
+01 · INCIDENT TRIGGER  →  02 · DATA INGESTION  →  03 · SLICK ANALYSIS  →  04 · BACKWARD RECON
+                                          ↓
+07 · EVIDENCE FUSION  ←  06 · VESSEL IDENTIFICATION  ←  05 · FORWARD DRIFT TRACE
 ```
 
 | Stage | What happens |
